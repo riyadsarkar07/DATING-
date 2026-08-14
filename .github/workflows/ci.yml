@@ -19,15 +19,23 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install dependencies
+      - name: Install User App dependencies
         run: npm install --no-audit --no-fund --legacy-peer-deps
 
-      - name: Typecheck
+      - name: Typecheck User App
         run: npm run typecheck
 
-      - name: Lint
+      - name: Lint User App
         run: npm run lint
 
+      - name: Install Cloud Functions dependencies
+        run: npm ci --no-audit --no-fund
+        working-directory: functions
+
       - name: Typecheck Cloud Functions
-        run: npm install --no-audit --no-fund --legacy-peer-deps && npm run typecheck
+        run: npm run typecheck
+        working-directory: functions
+
+      - name: Build Cloud Functions
+        run: npm run build
         working-directory: functions
