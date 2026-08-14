@@ -1,0 +1,91 @@
+{
+  "expo": {
+    "name": "SparkX",
+    "slug": "sparkx",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "sparkx",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "description": "Premium luxury dating app - SparkX",
+    "icon": "./src/assets/icon.png",
+    "splash": {
+      "image": "./src/assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#05050A"
+    },
+    "android": {
+      "package": "com.sparkx.app",
+      "versionCode": 1,
+      "googleServicesFile": "./google-services.json",
+      "edgeToEdgeEnabled": true,
+      "adaptiveIcon": {
+        "foregroundImage": "./src/assets/adaptive-icon.png",
+        "backgroundColor": "#05050A"
+      },
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "VIBRATE",
+        "WAKE_LOCK",
+        "POST_NOTIFICATIONS"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.sparkx.app",
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "SparkX uses the camera to let you take profile photos and make video calls.",
+        "NSMicrophoneUsageDescription": "SparkX uses the microphone to record voice messages and make calls.",
+        "NSPhotoLibraryUsageDescription": "SparkX needs access to your photo library to upload profile photos.",
+        "NSLocationWhenInUseUsageDescription": "SparkX uses your location to show you people nearby."
+      }
+    },
+    "plugins": [
+      "expo-font",
+      "expo-secure-store",
+      "expo-location",
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow SparkX to record voice messages and voice calls."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#7C4DFF",
+          "icon": "./src/assets/icon.png"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#05050A",
+          "image": "./src/assets/splash.png",
+          "imageWidth": 200
+        }
+      ],
+      "@react-native-firebase/app",
+      "@react-native-firebase/auth",
+      "@react-native-firebase/messaging",
+      "@react-native-firebase/crashlytics"
+    ],
+    "web": {
+      "favicon": "./src/assets/icon.png",
+      "output": "single"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "sparkx-app"
+      }
+    }
+  }
+}

@@ -1,0 +1,466 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helpers ----------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && userId == uid();
+    }
+
+    function existsMatchDoc(matchId) {
+      return exists(/databases/$(database)/documents/matches/$(matchId));
+    }
+
+    function canAccessMatch(matchId) {
+      return isSignedIn()
+        && existsMatchDoc(matchId)
+        && get(/databases/$(database)/documents/matches/$(matchId)).data.userIds
+          .hasAny([uid()]);
+    }
+
+    function isMatchBetween(matchId, a, b) {
+      return existsMatchDoc(matchId)
+        && get(/databases/$(database)/documents/matches/$(matchId)).data.userIds
+          .hasAll([a, b]);
+    }
+
+    // Server-owned match doc. Clients never create matches — the recordSwipe
+    // callable verifies a mutual like and creates them with the Admin SDK.
+    function matchUserIds(matchId) {
+      return existsMatchDoc(matchId)
+        ? get(/databases/$(database)/documents/matches/$(matchId)).data.userIds
+        : null;
+    }
+
+    // Public users doc: fields a member may set when creating their own doc.
+    // Privileged badges (premium/premiumTier/boostUntil/verified) are excluded —
+    // they are only written by Cloud Functions / Admin SDK. `location` is also
+    // excluded: precise location lives in the private doc and only a coarse
+    // copy is written to this doc by the onPrivateProfileWrite trigger.
+    function writableUserCreateFields() {
+      return request.resource.data.keys().hasOnly([
+          'uid',
+          'displayName',
+          'photos',
+          'photoMeta',
+          'videoIntro',
+          'dob',
+          'age',
+          'gender',
+          'interestedIn',
+          'country',
+          'city',
+          'bio',
+          'height',
+          'religion',
+          'education',
+          'occupation',
+          'languages',
+          'relationshipGoal',
+          'smoking',
+          'drinking',
+          'pets',
+          'hobbies',
+          'instagram',
+          'spotify',
+          'online',
+          'lastActive',
+          'setupComplete',
+          'createdAt',
+          'blockedUsers',
+          'deleted',
+          'updatedAt',
+          'profileUpdatedAt',
+        ]);
+    }
+
+    // Public users doc: fields a member may update on their own doc.
+    function writableUserUpdateFields() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly([
+          'displayName',
+          'photos',
+          'photoMeta',
+          'videoIntro',
+          'dob',
+          'age',
+          'gender',
+          'interestedIn',
+          'country',
+          'city',
+          'bio',
+          'height',
+          'religion',
+          'education',
+          'occupation',
+          'languages',
+          'relationshipGoal',
+          'smoking',
+          'drinking',
+          'pets',
+          'hobbies',
+          'instagram',
+          'spotify',
+          'online',
+          'lastActive',
+          'setupComplete',
+          'updatedAt',
+          'profileUpdatedAt',
+        ]);
+    }
+
+    // users/{uid}/private/profile: owner-writable PII fields only.
+    // Server-managed moderation fields (banned*, reported*, blockedBy) are
+    // excluded so a member can never read/write them directly.
+    function writablePrivateFields() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly([
+          'email',
+          'phone',
+          'fcmToken',
+          'location',
+          'updatedAt',
+        ]);
+    }
+
+    // Same field list, but for document creation (resource.data is null on
+    // create, so diff() cannot be used there).
+    function writablePrivateCreateFields() {
+      return request.resource.data.keys().hasOnly([
+          'email',
+          'phone',
+          'fcmToken',
+          'location',
+          'updatedAt',
+        ]);
+    }
+
+    // Matches: only benign per-participant fields may be edited. The
+    // participants sub-check lives in the update rule so either participant
+    // of the match may write their own (or the other's) participant entry —
+    // required for unseen-count bumps written by the sender.
+    function writableMatchFields() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+        .hasOnly([
+          'lastMessagePreview',
+          'lastMessageKind',
+          'lastMessageSenderId',
+          'lastMessageAt',
+          'isArchived',
+          'isPinned',
+          'isMuted',
+          'typingUsers',
+          'participants',
+          'updatedAt',
+        ]);
+    }
+
+    // ---------- users ----------
+    match /users/{userId} {
+      // Owners can always read their own doc (even before completing setup);
+      // others may only read completed, non-deleted profiles.
+      allow read: if isSignedIn()
+        && (isAdmin() || isOwner(userId)
+          || (!resource.data.deleted && resource.data.setupComplete != false));
+
+      allow create: if isOwner(userId)
+        && !request.resource.data.deleted
+        && request.resource.data.uid == userId
+        && writableUserCreateFields();
+
+      allow update: if isOwner(userId)
+        && !resource.data.deleted
+        && !request.resource.data.deleted
+        && writableUserUpdateFields();
+
+      allow delete: if false;
+
+      // users/{userId}/private/profile — owner/admin-only PII
+      match /private/profile {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if (isOwner(userId) && writablePrivateCreateFields()) || isAdmin();
+        allow update: if isAdmin() || (isOwner(userId) && writablePrivateFields());
+        allow delete: if false;
+      }
+
+      // users/{userId}/callSignals
+      match /callSignals/{signalId} {
+        allow read: if isSignedIn()
+          && (resource.data.calleeId == uid()
+            || resource.data.callerId == uid());
+
+        // A call may only be initiated towards a user the caller is matched
+        // with (verified against the match doc), and cannot be self-directed.
+        allow create: if isSignedIn()
+          && request.resource.data.calleeId != null
+          && request.resource.data.calleeId == userId
+          && request.resource.data.callerId == uid()
+          && request.resource.data.calleeId != request.resource.data.callerId
+          && request.resource.data.status == 'ringing'
+          && request.resource.data.type in ['voice', 'video']
+          && request.resource.data.matchId != null
+          && request.resource.data.matchId != ''
+          && isMatchBetween(request.resource.data.matchId,
+            request.resource.data.callerId, request.resource.data.calleeId)
+          && request.resource.data.keys()
+            .hasOnly(['callerId', 'calleeId', 'matchId', 'type', 'status',
+              'createdAt', 'answeredAt', 'updatedAt']);
+
+        // Both the caller and the callee may update the signal lifecycle.
+        allow update: if isSignedIn()
+          && (resource.data.calleeId == uid()
+            || resource.data.callerId == uid())
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'answeredAt', 'updatedAt']);
+
+        allow delete: if false;
+      }
+    }
+
+    // ---------- profiles (public searchable summaries, legacy/dead surface) ----------
+    match /profiles/{profileId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if false;
+    }
+
+    // ---------- swipes ----------
+    // Clients never create swipes — the recordSwipe callable debits coins for
+    // Super Likes and writes them server-side.
+    match /swipes/{swipeId} {
+      allow create: if false;
+      allow read: if isSignedIn()
+        && (resource.data.userId == uid()
+          || resource.data.targetUid == uid());
+      allow update, delete: if false;
+    }
+
+    // ---------- matches ----------
+    // Clients never create matches — only the recordSwipe callable (after a
+    // verified mutual like) creates them with the Admin SDK.
+    match /matches/{matchId} {
+      allow read: if canAccessMatch(matchId);
+      allow create: if false;
+      allow update: if canAccessMatch(matchId)
+        && writableMatchFields()
+        && matchUserIds(matchId) != null
+        && request.resource.data.participants
+          .diff(resource.data.participants)
+          .affectedKeys()
+          .hasOnly(matchUserIds(matchId));
+      allow delete: if false;
+
+      // matches/{matchId}/messages — legacy/dead surface, read-only
+      match /messages/{messageId} {
+        allow read: if canAccessMatch(matchId);
+        allow create, update, delete: if false;
+      }
+    }
+
+    // ---------- messages (root collection, matchId field) ----------
+    match /messages/{messageId} {
+      allow read: if isSignedIn()
+        && resource.data.matchId != null
+        && canAccessMatch(resource.data.matchId);
+
+      // Only the sender may author a message inside a match they belong to.
+      // The "You matched!" system message is created server-side by the
+      // recordSwipe callable, never by clients.
+      allow create: if isSignedIn()
+        && request.resource.data.matchId != null
+        && canAccessMatch(request.resource.data.matchId)
+        && request.resource.data.senderId == uid()
+        && request.resource.data.kind != 'system'
+        && request.resource.data.kind in ['text', 'image', 'video', 'voice', 'emoji', 'gif']
+        && request.resource.data.keys()
+          .hasOnly(['matchId', 'senderId', 'kind', 'text', 'mediaUrl',
+            'mediaWidth', 'mediaHeight', 'durationMs', 'replyTo', 'createdAt',
+            'readAt', 'deliveredAt', 'deleted']);
+
+      allow update: if isSignedIn()
+        && resource.data.matchId != null
+        && canAccessMatch(resource.data.matchId)
+        && (
+          // a sender may only soft-delete their own message
+          (resource.data.senderId == uid()
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['deleted', 'text', 'updatedAt']))
+          // any participant may update read/delivered receipts
+          || request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['readAt', 'deliveredAt'])
+        );
+
+      allow delete: if false;
+    }
+
+    // ---------- notifications ----------
+    // Notifications are only written by Cloud Functions (onMatchCreated,
+    // onMessageCreated, onCallHistoryCreated, support triggers). Clients can
+    // only read their own and mark them read.
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn()
+        && resource.data.userId == uid();
+      allow update: if isSignedIn()
+        && resource.data.userId == uid()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['read']);
+      allow create: if false;
+      allow delete: if false;
+    }
+
+    // ---------- coins ----------
+    // All balance changes happen server-side via callables; clients only read.
+    match /coins/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update, delete: if false;
+    }
+
+    // ---------- coin_transactions ----------
+    match /coin_transactions/{txId} {
+      allow read: if isSignedIn()
+        && (resource.data.userId == uid()
+          || resource.data.targetUserId == uid());
+      allow create, update, delete: if false;
+    }
+
+    // ---------- premium ----------
+    match /premium/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update, delete: if false;
+    }
+
+    // ---------- daily_rewards ----------
+    match /daily_rewards/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update, delete: if false;
+    }
+
+    // ---------- lucky_spins ----------
+    match /lucky_spins/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update, delete: if false;
+    }
+
+    // ---------- boosts ----------
+    match /boosts/{userId} {
+      allow read: if isOwner(userId);
+      allow create, update, delete: if false;
+    }
+
+    // ---------- verification_requests ----------
+    match /verification_requests/{requestId} {
+      allow read: if isSignedIn()
+        && (isAdmin() || resource.data.userId == uid());
+      allow create: if isSignedIn()
+        && request.resource.data.userId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys()
+          .hasOnly(['userId', 'selfieUrl', 'idPhotoUrl', 'status', 'createdAt', 'reviewedAt']);
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'rejectionReason', 'reviewedBy', 'reviewedAt']);
+      allow delete: if false;
+    }
+
+    // ---------- call_history ----------
+    match /call_history/{callId} {
+      allow read: if isSignedIn()
+        && (resource.data.callerId == uid()
+          || resource.data.calleeId == uid());
+      allow create: if isSignedIn()
+        && request.resource.data.callerId != null
+        && request.resource.data.calleeId != null
+        && request.resource.data.callerId != request.resource.data.calleeId
+        && (request.resource.data.callerId == uid()
+          || request.resource.data.calleeId == uid())
+        && request.resource.data.matchId != null
+        && request.resource.data.matchId != ''
+        && isMatchBetween(request.resource.data.matchId,
+          request.resource.data.callerId, request.resource.data.calleeId)
+        && request.resource.data.type in ['voice', 'video']
+        && request.resource.data.status in ['missed', 'ended', 'ongoing']
+        && request.resource.data.keys()
+          .hasOnly(['callerId', 'calleeId', 'matchId', 'type', 'status',
+            'startedAt', 'endedAt', 'durationSec', 'notifyTo', 'updatedAt']);
+      allow update: if isSignedIn()
+        && (resource.data.callerId == uid()
+          || resource.data.calleeId == uid())
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'endedAt', 'durationSec', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    // ---------- reports ----------
+    match /reports/{reportId} {
+      allow create: if isSignedIn()
+        && request.resource.data.reporterUid == uid()
+        && request.resource.data.targetUid != null
+        && request.resource.data.targetUid != uid()
+        && request.resource.data.status == 'open'
+        && request.resource.data.keys()
+          .hasOnly(['reporterUid', 'targetUid', 'reason', 'details', 'status', 'createdAt']);
+      allow read, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // ---------- support ----------
+    match /support/{ticketId} {
+      allow create: if isSignedIn()
+        && request.resource.data.userId == uid()
+        && request.resource.data.status == 'open'
+        && request.resource.data.priority == 'normal'
+        && request.resource.data.keys()
+          .hasOnly(['userId', 'subject', 'message', 'category', 'status', 'priority', 'createdAt', 'updatedAt']);
+      allow read: if isSignedIn()
+        && (isAdmin() || resource.data.userId == uid());
+      allow update: if isSignedIn()
+        && (isAdmin()
+          || (resource.data.userId == uid()
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'updatedAt'])));
+      allow delete: if false;
+
+      // support/{ticketId}/messages — realtime live support thread
+      match /messages/{messageId} {
+        allow read: if isSignedIn()
+          && (isAdmin()
+            || get(/databases/$(database)/documents/support/$(ticketId)).data.userId == uid());
+        allow create: if isSignedIn()
+          && request.resource.data.ticketId == ticketId
+          && request.resource.data.senderRole == 'user'
+          && (isAdmin()
+            || (request.resource.data.senderUid == uid()
+              && get(/databases/$(database)/documents/support/$(ticketId)).data.userId == uid()));
+        allow update: if isSignedIn()
+          && isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status']);
+        allow delete: if false;
+      }
+    }
+
+    // ---------- admin_users ----------
+    match /admin_users/{adminUid} {
+      allow read: if isAdmin();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
+    // ---------- settings ----------
+    match /settings/{userId} {
+      allow read, create, update: if isOwner(userId);
+      allow delete: if false;
+    }
+  }
+}

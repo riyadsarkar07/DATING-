@@ -39,6 +39,7 @@
 
 # Node.js
 **/node_modules/
+**/.expo/
 **/npm-debug.log*
 **/yarn-debug.log*
 **/yarn-error.log*
@@ -174,3 +175,14 @@
 *.lz
 *.lzma
 *.iso
+
+# Firebase credentials
+google-services.json
+GoogleService-Info.plist
+
+# Firebase functions
+functions/node_modules/
+functions/lib/
+functions/.firebase/
+functions/.runtimeconfig.json
+firebase-debug.log
