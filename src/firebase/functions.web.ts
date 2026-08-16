@@ -1,5 +1,4 @@
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/functions';
+import firebase from './initialize.web';
 
 export async function callFunction<T = unknown>(
   name: string,

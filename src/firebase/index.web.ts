@@ -1,16 +1,4 @@
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
-import 'firebase/compat/firestore';
-import 'firebase/compat/storage';
-import 'firebase/compat/functions';
-import 'firebase/compat/analytics';
-import { firebaseConfig } from './config';
-
-if (!firebase.apps.length) {
-  firebase.initializeApp(firebaseConfig);
-}
-
-export { default as firebase } from 'firebase/compat/app';
+export { default as firebase } from './initialize.web';
 export { default as auth } from 'firebase/compat/auth';
 export { default as firestore } from 'firebase/compat/firestore';
 export { default as storage } from 'firebase/compat/storage';

@@ -1,7 +1,15 @@
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/firestore';
+import firebase from './initialize.web';
 
-export const db = firebase.firestore();
+let dbInstance: firebase.firestore.Firestore | null = null;
+
+function getDb(): firebase.firestore.Firestore {
+  if (!dbInstance) {
+    dbInstance = firebase.firestore();
+  }
+  return dbInstance;
+}
+
+export const db = getDb();
 
 export const COLLECTIONS = {
   users: 'users',

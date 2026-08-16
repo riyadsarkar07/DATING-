@@ -1,5 +1,4 @@
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/analytics';
+import firebase from './initialize.web';
 import { store } from '../store';
 
 export async function bootstrapAnalytics(): Promise<void> {

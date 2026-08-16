@@ -1,20 +1,26 @@
-import firebase from 'firebase/compat/app';
-import 'firebase/compat/auth';
+import firebase from './initialize.web';
 import { AuthError } from '../core/errors/AuthError';
 import { getErrorMessage } from '../core/errors/FirebaseErrorMessage';
 import { AuthResult, CreateAccountParams } from '../types';
 
-const authInstance = firebase.auth();
+let authInstance: firebase.auth.Auth | null = null;
+
+function getAuth(): firebase.auth.Auth {
+  if (!authInstance) {
+    authInstance = firebase.auth();
+  }
+  return authInstance;
+}
 
 export const onAuthStateChanged = (cb: (user: any) => void): (() => void) => {
-  return authInstance.onAuthStateChanged(cb);
+  return getAuth().onAuthStateChanged(cb);
 };
 
-export const getCurrentUser = () => authInstance.currentUser;
+export const getCurrentUser = () => getAuth().currentUser;
 
 export async function registerWithEmail(params: CreateAccountParams): Promise<AuthResult> {
   try {
-    const credential = await authInstance.createUserWithEmailAndPassword(params.email, params.password);
+    const credential = await getAuth().createUserWithEmailAndPassword(params.email, params.password);
     if (params.displayName) {
       await credential.user?.updateProfile({ displayName: params.displayName });
     }
@@ -26,7 +32,7 @@ export async function registerWithEmail(params: CreateAccountParams): Promise<Au
 
 export async function loginWithEmail(email: string, password: string): Promise<AuthResult> {
   try {
-    const credential = await authInstance.signInWithEmailAndPassword(email.trim(), password);
+    const credential = await getAuth().signInWithEmailAndPassword(email.trim(), password);
     return { user: credential.user! };
   } catch (err) {
     throw new AuthError(getErrorMessage(err), err);
@@ -35,7 +41,7 @@ export async function loginWithEmail(email: string, password: string): Promise<A
 
 export async function signInWithGoogle(idToken: string): Promise<AuthResult> {
   try {
-    const credential = await authInstance.signInWithCredential(
+    const credential = await getAuth().signInWithCredential(
       firebase.auth.GoogleAuthProvider.credential(idToken),
     );
     return { user: credential.user! };
@@ -54,7 +60,7 @@ export async function verifyOtp(verificationId: string, code: string): Promise<A
 
 export async function sendPasswordResetEmail(email: string): Promise<void> {
   try {
-    await authInstance.sendPasswordResetEmail(email.trim());
+    await getAuth().sendPasswordResetEmail(email.trim());
   } catch (err) {
     throw new AuthError(getErrorMessage(err), err);
   }
@@ -100,7 +106,7 @@ export async function updateDisplayName(displayName: string): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
-  await authInstance.signOut();
+  await getAuth().signOut();
 }
 
 export async function deleteFirebaseUser(): Promise<void> {
